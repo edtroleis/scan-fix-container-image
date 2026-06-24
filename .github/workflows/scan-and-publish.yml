@@ -1,0 +1,166 @@
+name: Scan and Publish Container Image
+
+on:
+  workflow_dispatch:
+    inputs:
+      registry:
+        description: "Source registry"
+        required: true
+        type: choice
+        options:
+          - docker.io
+          - quay.io
+      image_name:
+        description: "Image name (e.g. library/ubuntu or username/myapp)"
+        required: true
+        type: string
+      tag:
+        description: "Image tag"
+        required: true
+        default: "latest"
+        type: string
+      severity:
+        description: "Minimum CVE severity that breaks the pipeline"
+        required: true
+        type: choice
+        default: "HIGH,CRITICAL"
+        options:
+          - CRITICAL
+          - HIGH,CRITICAL
+          - MEDIUM,HIGH,CRITICAL
+
+jobs:
+
+  # ----------------------------------------------------------------------------
+  # Job 1: Scan original image
+  # Fails if CVEs at or above the configured severity are found.
+  # ----------------------------------------------------------------------------
+  scan:
+    name: CVE Scan
+    runs-on: self-hosted
+    env:
+      SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        run: podman pull "$SOURCE_IMAGE"
+
+      - name: Scan
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ${{ env.SOURCE_IMAGE }}
+          tar_path: /tmp/source-image.tar
+          artifact_name: trivy-results
+          severity: ${{ inputs.severity }}
+
+  # ----------------------------------------------------------------------------
+  # Job 2: Patch image (only when scan fails due to CVEs)
+  # Detects the container OS via /etc/os-release, generates a Dockerfile
+  # with FROM <source_image> + OS package update, and builds a patched image.
+  # ----------------------------------------------------------------------------
+  patch:
+    name: Patch Image (OS Update)
+    runs-on: self-hosted
+    needs: scan
+    if: always() && needs.scan.result == 'failure'
+    env:
+      SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
+      PATCHED_IMAGE: ${{ inputs.image_name }}:${{ inputs.tag }}-patched
+      # Nexus API/package proxy host (port 8081). Set in GitHub → Variables.
+      # Defaults to localhost:8081 in patch-image.sh if variable is not set.
+      NEXUS_HOST: ${{ vars.NEXUS_HOST }}
+      # Credentials read by patch-image.sh and passed to podman build --secret.
+      # They are mounted as tmpfs during the RUN step only — never in image layers.
+      NEXUS_USER: ${{ secrets.NEXUS_USER }}
+      NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Pull image
+        run: podman pull "$SOURCE_IMAGE"
+
+      - name: Build patched image
+        run: bash patch-image.sh "$SOURCE_IMAGE" "$PATCHED_IMAGE"
+
+  # ----------------------------------------------------------------------------
+  # Job 3: Rescan the patched image
+  # Same severity gate as the original scan.
+  # Fails if CVEs remain after the OS update.
+  # ----------------------------------------------------------------------------
+  rescan:
+    name: CVE Rescan (Patched)
+    runs-on: self-hosted
+    needs: [scan, patch]
+    if: always() && needs.patch.result == 'success'
+    env:
+      PATCHED_IMAGE: ${{ inputs.image_name }}:${{ inputs.tag }}-patched
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Scan
+        uses: ./.github/actions/trivy-scan
+        with:
+          image: ${{ env.PATCHED_IMAGE }}
+          tar_path: /tmp/patched-image.tar
+          artifact_name: trivy-results-patched
+          severity: ${{ inputs.severity }}
+
+  # ----------------------------------------------------------------------------
+  # Job 4: Publish to Nexus
+  # Runs when either the original scan passed or the patched rescan passed.
+  # Resolves which image to push at runtime: original tag when scan passed,
+  # <tag>-patched when rescan passed.
+  # ----------------------------------------------------------------------------
+  publish:
+    name: Publish to Nexus
+    runs-on: self-hosted
+    needs: [scan, rescan]
+    if: always() && (needs.scan.result == 'success' || needs.rescan.result == 'success')
+
+    steps:
+      - name: Resolve image to publish
+        id: vars
+        run: |
+          if [ "${{ needs.scan.result }}" = "success" ]; then
+            echo "source=${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "nexus_target=${{ vars.NEXUS_HOST_EXTERNAL_IMAGES }}/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "source=${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
+            echo "nexus_target=${{ vars.NEXUS_HOST_EXTERNAL_IMAGES }}/${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Login to Nexus
+        run: |
+          echo "${{ secrets.NEXUS_PASSWORD }}" | \
+            podman login "${{ vars.NEXUS_HOST_EXTERNAL_IMAGES }}" \
+              --username "${{ secrets.NEXUS_USER }}" \
+              --password-stdin \
+              --tls-verify=false
+
+      - name: Tag image for Nexus
+        run: podman tag "${{ steps.vars.outputs.source }}" "${{ steps.vars.outputs.nexus_target }}"
+
+      - name: Push to Nexus
+        run: podman push --tls-verify=false "${{ steps.vars.outputs.nexus_target }}"
+
+      - name: Job summary
+        run: |
+          echo "## Published successfully" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| | |" >> $GITHUB_STEP_SUMMARY
+          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
+          echo "| **Source** | \`${{ steps.vars.outputs.source }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Nexus**  | \`${{ steps.vars.outputs.nexus_target }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Severity gate** | \`${{ inputs.severity }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull from Nexus" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          echo "podman pull --tls-verify=false ${{ steps.vars.outputs.nexus_target }}" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY

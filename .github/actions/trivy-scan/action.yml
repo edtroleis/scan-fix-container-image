@@ -1,0 +1,64 @@
+name: Trivy CVE Scan
+description: Install Trivy, save a Podman image to tar, scan it, and upload the SARIF report.
+
+inputs:
+  image:
+    description: "Image name to save and scan (e.g. docker.io/library/ubuntu:24.04)"
+    required: true
+  tar_path:
+    description: "Absolute path for the saved tar file (e.g. /tmp/source-image.tar)"
+    required: true
+  artifact_name:
+    description: "Name of the GitHub Actions artifact that receives the SARIF report"
+    required: true
+  severity:
+    description: "Minimum CVE severity that causes the scan step to fail (e.g. HIGH,CRITICAL)"
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Install Trivy
+      shell: bash
+      run: |
+        mkdir -p "$HOME/.local/bin"
+        if ! command -v trivy &>/dev/null; then
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin"
+        fi
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Save image for scanning
+      shell: bash
+      run: |
+        rm -f "${{ inputs.tar_path }}"
+        podman save "${{ inputs.image }}" -o "${{ inputs.tar_path }}"
+
+    - name: Scan for CVEs
+      shell: bash
+      run: |
+        trivy image \
+          --exit-code 1 \
+          --severity "${{ inputs.severity }}" \
+          --ignore-unfixed \
+          --format table \
+          --input "${{ inputs.tar_path }}"
+
+    - name: Scan summary (SARIF)
+      if: always()
+      shell: bash
+      run: |
+        trivy image \
+          --exit-code 0 \
+          --severity "${{ inputs.severity }}" \
+          --ignore-unfixed \
+          --format sarif \
+          --output trivy-results.sarif \
+          --input "${{ inputs.tar_path }}" || true
+
+    - name: Upload scan results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: trivy-results.sarif
