@@ -35,11 +35,11 @@ Docker Hub / Quay.io
 │    upload SARIF artifact        │
 └────────────────┬────────────────┘
                  │
-    ┌────────────┴────────────────────┐
+    ┌────────────┴─────────────────────┐
     │ clean (no CVEs)                  │ CVEs found
     │                                  ▼
     │               ┌───────────────────────────────────┐
-    │               │ Job 2 — Patch Image (OS Update)    │
+    │               │ Job 2 — Patch Image (OS Update)   │
     │               │ podman pull <image>               │
     │               │ detect OS via /etc/os-release     │
     │               │ apt-get / dnf / apk upgrade       │
@@ -49,24 +49,24 @@ Docker Hub / Quay.io
     │                                 │
     │                                 ▼
     │               ┌───────────────────────────────────┐
-    │               │ Job 3 — CVE Rescan (Patched)       │
-    │               │ → .github/actions/trivy-scan       │
+    │               │ Job 3 — CVE Rescan (Patched)      │
+    │               │ → .github/actions/trivy-scan      │
     │               │   (same action, patched image)    │
     │               │   upload SARIF artifact (patched) │
     │               └─────────────────┬─────────────────┘
     │                                 │
-    │                    ┌────────────┴────────────┐
+    │                    ┌────────────┴─────────────┐
     │                    │ clean                    │ CVEs remain
-    ▼                    ▼                          ▼
-    └──────────► ┌──────────────────────┐   pipeline fails
-                 │ Job 4 — Publish       │
-                 │ resolve image:        │
-                 │  scan ok  → <tag>     │
-                 │  rescan ok → <tag>-   │
+    │                    ▼                          ▼
+    │            ┌───────────────────────┐   pipeline fails
+    │            │ Job 4 — Publish       │
+    │            │ resolve image:        │
+    │            │  scan ok  → <tag>     │
+    └──────────► │  rescan ok → <tag>-   │
                  │              patched  │
                  │ podman tag            │
                  │ # podman push (sim.)  │
-                 └──────────────────────┘
+                 └───────────────────────┘
 ```
 
 ---
