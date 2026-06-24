@@ -37,7 +37,7 @@ jobs:
   # ----------------------------------------------------------------------------
   scan:
     name: CVE Scan
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
 
@@ -63,19 +63,12 @@ jobs:
   # ----------------------------------------------------------------------------
   patch:
     name: Patch Image (OS Update)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: scan
     if: always() && needs.scan.result == 'failure'
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
       PATCHED_IMAGE: ${{ inputs.image_name }}:${{ inputs.tag }}-patched
-      # Nexus API/package proxy host (port 8081). Set in GitHub → Variables.
-      # Defaults to localhost:8081 in patch-image.sh if variable is not set.
-      NEXUS_HOST: ${{ vars.NEXUS_HOST }}
-      # Credentials read by patch-image.sh and passed to podman build --secret.
-      # They are mounted as tmpfs during the RUN step only — never in image layers.
-      NEXUS_USER: ${{ secrets.NEXUS_USER }}
-      NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
 
     steps:
       - name: Checkout
@@ -94,7 +87,7 @@ jobs:
   # ----------------------------------------------------------------------------
   rescan:
     name: CVE Rescan (Patched)
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [scan, patch]
     if: always() && needs.patch.result == 'success'
     env:
@@ -113,14 +106,15 @@ jobs:
           severity: ${{ inputs.severity }}
 
   # ----------------------------------------------------------------------------
-  # Job 4: Publish to Nexus
+  # Job 4: Publish to registry
   # Runs when either the original scan passed or the patched rescan passed.
   # Resolves which image to push at runtime: original tag when scan passed,
   # <tag>-patched when rescan passed.
+  # NOTE: podman push is commented out — registry is simulated (localhost:8083).
   # ----------------------------------------------------------------------------
   publish:
     name: Publish to Nexus
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     needs: [scan, rescan]
     if: always() && (needs.scan.result == 'success' || needs.rescan.result == 'success')
 
@@ -130,25 +124,27 @@ jobs:
         run: |
           if [ "${{ needs.scan.result }}" = "success" ]; then
             echo "source=${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "nexus_target=${{ vars.NEXUS_HOST_EXTERNAL_IMAGES }}/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "nexus_target=localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
           else
             echo "source=${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
-            echo "nexus_target=${{ vars.NEXUS_HOST_EXTERNAL_IMAGES }}/${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
+            echo "nexus_target=localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Login to Nexus
+      - name: Login to registry
         run: |
           echo "${{ secrets.NEXUS_PASSWORD }}" | \
-            podman login "${{ vars.NEXUS_HOST_EXTERNAL_IMAGES }}" \
+            podman login localhost:8083 \
               --username "${{ secrets.NEXUS_USER }}" \
               --password-stdin \
               --tls-verify=false
 
-      - name: Tag image for Nexus
+      - name: Tag image for registry
         run: podman tag "${{ steps.vars.outputs.source }}" "${{ steps.vars.outputs.nexus_target }}"
 
-      - name: Push to Nexus
-        run: podman push --tls-verify=false "${{ steps.vars.outputs.nexus_target }}"
+      - name: Push to registry
+        run: |
+          # podman push --tls-verify=false "${{ steps.vars.outputs.nexus_target }}"
+          echo "Simulated push: ${{ steps.vars.outputs.nexus_target }}"
 
       - name: Job summary
         run: |
@@ -157,10 +153,10 @@ jobs:
           echo "| | |" >> $GITHUB_STEP_SUMMARY
           echo "|---|---|" >> $GITHUB_STEP_SUMMARY
           echo "| **Source** | \`${{ steps.vars.outputs.source }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Nexus**  | \`${{ steps.vars.outputs.nexus_target }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| **Registry** | \`${{ steps.vars.outputs.nexus_target }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| **Severity gate** | \`${{ inputs.severity }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Pull from Nexus" >> $GITHUB_STEP_SUMMARY
+          echo "### Pull from registry" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
           echo "podman pull --tls-verify=false ${{ steps.vars.outputs.nexus_target }}" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
