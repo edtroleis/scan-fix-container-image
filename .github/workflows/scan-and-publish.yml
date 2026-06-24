@@ -131,7 +131,7 @@ jobs:
   # NOTE: podman push is commented out — registry is simulated (localhost:8083).
   # ----------------------------------------------------------------------------
   publish:
-    name: Publish to Nexus
+    name: Publish to Registry
     runs-on: ubuntu-latest
     needs: [scan, rescan]
     if: always() && (needs.scan.result == 'success' || needs.rescan.result == 'success')
@@ -165,11 +165,11 @@ jobs:
 
       - name: Login to registry
         run: |
-          echo "${{ secrets.NEXUS_PASSWORD }}" | \
-            podman login localhost:8083 \
-              --username "${{ secrets.NEXUS_USER }}" \
-              --password-stdin \
-              --tls-verify=false
+          # podman login localhost:8083 \
+          #   --username "${{ secrets.NEXUS_USER }}" \
+          #   --password-stdin \
+          #   --tls-verify=false
+          echo "Simulated login: localhost:8083"
 
       - name: Tag image for registry
         run: podman tag "${{ steps.vars.outputs.source }}" "${{ steps.vars.outputs.nexus_target }}"
