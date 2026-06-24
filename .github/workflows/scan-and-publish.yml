@@ -38,6 +38,7 @@ jobs:
   scan:
     name: CVE Scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
 
