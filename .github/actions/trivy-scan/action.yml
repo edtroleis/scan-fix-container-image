@@ -67,3 +67,71 @@ runs:
       with:
         name: ${{ inputs.artifact_name }}
         path: trivy-results.sarif
+
+    - name: Job summary
+      if: always()
+      shell: bash
+      run: |
+        TRIVY_JSON="${{ inputs.tar_path }}.json"
+
+        # Re-scan with JSON output — DB is already cached from the scan above.
+        # --scanners vuln: skip secret scanning (not needed for the summary).
+        trivy image \
+          --exit-code 0 \
+          --scanners vuln \
+          --severity "${{ inputs.severity }}" \
+          --ignore-unfixed \
+          --format json \
+          --output "$TRIVY_JSON" \
+          --input "${{ inputs.tar_path }}" 2>/dev/null || true
+
+        if [[ ! -s "$TRIVY_JSON" ]]; then
+          echo "## Trivy Scan — \`${{ inputs.image }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "Scan output not available." >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+        fi
+
+        jq -r \
+          --arg image "${{ inputs.image }}" \
+          --arg severity "${{ inputs.severity }}" \
+          '
+            [.Results[] | .Vulnerabilities[]? |
+             select(.FixedVersion != null and .FixedVersion != "")] as $vulns |
+            ($vulns | length) as $total |
+            ($vulns | map(select(.Severity == "CRITICAL")) | length) as $n_crit |
+            ($vulns | map(select(.Severity == "HIGH"))     | length) as $n_high |
+            ($vulns | map(select(.Severity == "MEDIUM"))   | length) as $n_med  |
+
+            "## Trivy Scan — `\($image)`",
+            "",
+            "| | |",
+            "|---|---|",
+            (if $total == 0
+             then "| **Status** | ✅ Passed |"
+             else "| **Status** | ❌ Failed — \($total) fixable CVE(s) |" end),
+            "| **Severity gate** | `\($severity)` |",
+            (if $n_crit > 0 then "| **CRITICAL** | \($n_crit) |" else empty end),
+            (if $n_high > 0 then "| **HIGH**     | \($n_high) |" else empty end),
+            (if $n_med  > 0 then "| **MEDIUM**   | \($n_med)  |" else empty end),
+            "",
+            if $total > 0 then
+              "### Fixable CVEs",
+              "",
+              "| Package | CVE | Severity | Installed | Fixed |",
+              "|---------|-----|----------|-----------|-------|",
+              (
+                $vulns |
+                sort_by([
+                  (if   .Severity == "CRITICAL" then 0
+                   elif .Severity == "HIGH"     then 1
+                   elif .Severity == "MEDIUM"   then 2
+                   else 3 end),
+                  .PkgName
+                ]) |
+                .[] |
+                "| `\(.PkgName)` | [\(.VulnerabilityID)](https://avd.aquasec.com/nvd/\(.VulnerabilityID | ascii_downcase)) | \(.Severity) | \(.InstalledVersion) | \(.FixedVersion) |"
+              )
+            else
+              "No fixable CVEs found at severity `\($severity)`."
+            end
+          ' "$TRIVY_JSON" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
