@@ -70,6 +70,18 @@ jobs:
       - name: Pull image
         run: podman pull "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}"
 
+      - name: Get image size
+        run: |
+          bytes=$(podman image inspect \
+            "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}" \
+            --format '{{.Size}}' 2>/dev/null || echo 0)
+          echo "ORIG_SIZE=$(awk -v b="$bytes" 'BEGIN{
+            if(b>=1073741824) printf "%.1f GiB",b/1073741824
+            else if(b>=1048576) printf "%.1f MiB",b/1048576
+            else if(b>=1024) printf "%.1f KiB",b/1024
+            else printf "%d B",b
+          }')" >> "$GITHUB_ENV"
+
       - name: Login to registry
         run: |
           # podman login localhost:8083 \
@@ -100,6 +112,7 @@ jobs:
             echo "| **Registry** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}\` |"
             echo "| **Severity gate** | \`${{ inputs.severity }}\` |"
             echo "| **Patched** | No — original image passed the scan |"
+            echo "| **Image size** | ${ORIG_SIZE} |"
             echo ""
             echo "### Pull from registry"
             echo '```'
@@ -132,13 +145,18 @@ jobs:
         run: bash patch-image.sh "$SOURCE_IMAGE" "$PATCHED_IMAGE"
 
       - name: Save patched image
-        run: podman save "$PATCHED_IMAGE" -o /tmp/patched-image.tar
+        run: |
+          podman image inspect "$SOURCE_IMAGE" --format '{{.Size}}' \
+            2>/dev/null > /tmp/original-size.txt || echo 0 > /tmp/original-size.txt
+          podman save "$PATCHED_IMAGE" -o /tmp/patched-image.tar
 
       - name: Upload patched image artifact
         uses: actions/upload-artifact@v4
         with:
           name: patched-image
-          path: /tmp/patched-image.tar
+          path: |
+            /tmp/patched-image.tar
+            /tmp/original-size.txt
           retention-days: 1
 
   # ----------------------------------------------------------------------------
@@ -193,6 +211,23 @@ jobs:
       - name: Load patched image
         run: podman load -i /tmp/patched-image.tar
 
+      - name: Get image sizes
+        run: |
+          fmt() {
+            awk -v b="$1" 'BEGIN{
+              if(b>=1073741824) printf "%.1f GiB",b/1073741824
+              else if(b>=1048576) printf "%.1f MiB",b/1048576
+              else if(b>=1024) printf "%.1f KiB",b/1024
+              else printf "%d B",b
+            }'
+          }
+          orig_bytes=$(cat /tmp/original-size.txt 2>/dev/null || echo 0)
+          patch_bytes=$(podman image inspect \
+            "${{ inputs.image_name }}:${{ inputs.tag }}-patched" \
+            --format '{{.Size}}' 2>/dev/null || echo 0)
+          echo "ORIG_SIZE=$(fmt "$orig_bytes")"   >> "$GITHUB_ENV"
+          echo "PATCH_SIZE=$(fmt "$patch_bytes")" >> "$GITHUB_ENV"
+
       - name: Login to registry
         run: |
           # podman login localhost:8083 \
@@ -223,6 +258,8 @@ jobs:
             echo "| **Registry** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched\` |"
             echo "| **Severity gate** | \`${{ inputs.severity }}\` |"
             echo "| **Patched** | Yes — original image had CVEs, rescan passed after patching |"
+            echo "| **Original image size** | ${ORIG_SIZE} |"
+            echo "| **Patched image size** | ${PATCH_SIZE} |"
             echo ""
             echo "### Pull from registry"
             echo '```'
