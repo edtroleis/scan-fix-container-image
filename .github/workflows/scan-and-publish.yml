@@ -80,6 +80,16 @@ jobs:
       - name: Build patched image
         run: bash patch-image.sh "$SOURCE_IMAGE" "$PATCHED_IMAGE"
 
+      - name: Save patched image
+        run: podman save "$PATCHED_IMAGE" -o /tmp/patched-image.tar
+
+      - name: Upload patched image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: patched-image
+          path: /tmp/patched-image.tar
+          retention-days: 1
+
   # ----------------------------------------------------------------------------
   # Job 3: Rescan the patched image
   # Same severity gate as the original scan.
@@ -97,6 +107,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Download patched image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-image
+          path: /tmp/
+
       - name: Scan
         uses: ./.github/actions/trivy-scan
         with:
@@ -104,6 +120,7 @@ jobs:
           tar_path: /tmp/patched-image.tar
           artifact_name: trivy-results-patched
           severity: ${{ inputs.severity }}
+          skip_save: 'true'
 
   # ----------------------------------------------------------------------------
   # Job 4: Publish to registry
@@ -129,6 +146,21 @@ jobs:
             echo "source=${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
             echo "nexus_target=localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Pull source image
+        if: needs.scan.result == 'success'
+        run: podman pull "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}"
+
+      - name: Download patched image artifact
+        if: needs.rescan.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-image
+          path: /tmp/
+
+      - name: Load patched image
+        if: needs.rescan.result == 'success'
+        run: podman load -i /tmp/patched-image.tar
 
       - name: Login to registry
         run: |

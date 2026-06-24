@@ -14,6 +14,10 @@ inputs:
   severity:
     description: "Minimum CVE severity that causes the scan step to fail (e.g. HIGH,CRITICAL)"
     required: true
+  skip_save:
+    description: "Set to 'true' when tar_path already exists (downloaded as artifact) — skips podman save"
+    required: false
+    default: 'false'
 
 runs:
   using: composite
@@ -29,6 +33,7 @@ runs:
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Save image for scanning
+      if: inputs.skip_save != 'true'
       shell: bash
       run: |
         rm -f "${{ inputs.tar_path }}"
