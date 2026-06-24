@@ -1,6 +1,6 @@
-# scan-fix-container-image
+# Scan, patch, and publish container images
 
-Scan public container images for CVEs using Trivy and publish approved images to a container registry. When CVEs are found the pipeline automatically patches the image by updating OS and language-runtime packages from public repositories, rescans, and only publishes if the patched image passes.
+Scan and patch public container images for CVEs using Trivy and publish approved images to a container registry. When CVEs are found the pipeline automatically patches the image by updating OS and language-runtime packages from public repositories, rescans, and only publishes if the patched image passes.
 
 > **Simulated registry:** `podman push` is commented out in the publish job. The pipeline runs end-to-end (pull → scan → patch → rescan → tag) but the final push to `localhost:8083` is a no-op so the workflow can be tested without a real registry.
 
