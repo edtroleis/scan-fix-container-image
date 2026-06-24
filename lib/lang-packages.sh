@@ -21,6 +21,9 @@ fi
 
 # ── Node.js ───────────────────────────────────────────────────────────────────
 if command -v npm >/dev/null 2>&1; then
+  # Upgrade npm itself first — its bundled node_modules (e.g. picomatch) carry
+  # their own CVEs that are only fixed by upgrading npm, not by npm update -g.
+  npm install -g npm@latest --silent 2>/dev/null || true
   npm update -g --silent 2>/dev/null || true
   npm cache clean --force 2>/dev/null || true
 fi
