@@ -15,8 +15,8 @@ detect_os() {
 
     CONTAINER_ID=$(podman create "$image" 2>/dev/null || true)
     if [[ -z "$CONTAINER_ID" ]]; then
-        echo "[ERROR] Could not create container from ${image}" >&2
-        exit 1
+        echo "[WARN] Could not create container from ${image}" >&2
+        return 1
     fi
 
     podman cp "${CONTAINER_ID}:/etc/os-release" "$build_dir/" 2>/dev/null || true
@@ -27,8 +27,8 @@ detect_os() {
     ORIGINAL_USER=$(podman inspect "$CONTAINER_ID" --format '{{.Config.User}}' 2>/dev/null || true)
 
     if [[ -z "$os_release" ]]; then
-        echo "[ERROR] /etc/os-release not found in ${image}" >&2
-        exit 1
+        echo "[WARN] /etc/os-release not found in ${image} — scratch/distroless image, no OS packages to patch" >&2
+        return 1
     fi
 
     OS_ID=$(echo "$os_release"      | grep "^ID="         | cut -d= -f2 | tr -d '"' || true)

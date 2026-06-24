@@ -32,7 +32,11 @@ trap cleanup EXIT
 
 # ── Detect OS ─────────────────────────────────────────────────────────────────
 echo "==> Detecting OS in ${SOURCE_IMAGE} ..."
-detect_os "$SOURCE_IMAGE" "$BUILD_DIR"
+if ! detect_os "$SOURCE_IMAGE" "$BUILD_DIR"; then
+    echo "==> Skipping patch — image has no standard OS or is scratch/distroless."
+    podman tag "$SOURCE_IMAGE" "$OUTPUT_IMAGE"
+    exit 0
+fi
 echo "==> Detected OS: ${OS_ID} ${OS_VERSION}"
 
 # ── Generate update script ────────────────────────────────────────────────────
