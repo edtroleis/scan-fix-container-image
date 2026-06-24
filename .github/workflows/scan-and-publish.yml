@@ -33,12 +33,14 @@ jobs:
 
   # ----------------------------------------------------------------------------
   # Job 1: Scan original image
-  # Fails if CVEs at or above the configured severity are found.
+  # The Scan step uses continue-on-error so the job always succeeds.
+  # A has_cves output flags whether CVEs were found, routing downstream jobs.
   # ----------------------------------------------------------------------------
   scan:
     name: CVE Scan
     runs-on: ubuntu-latest
-    continue-on-error: true
+    outputs:
+      has_cves: ${{ steps.result.outputs.has_cves }}
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
 
@@ -50,6 +52,8 @@ jobs:
         run: podman pull "$SOURCE_IMAGE"
 
       - name: Scan
+        id: scan
+        continue-on-error: true
         uses: ./.github/actions/trivy-scan
         with:
           image: ${{ env.SOURCE_IMAGE }}
@@ -57,8 +61,67 @@ jobs:
           artifact_name: trivy-results
           severity: ${{ inputs.severity }}
 
+      - name: Set CVE flag
+        id: result
+        run: |
+          if [[ "${{ steps.scan.outcome }}" == "failure" ]]; then
+            echo "has_cves=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_cves=false" >> "$GITHUB_OUTPUT"
+          fi
+
   # ----------------------------------------------------------------------------
-  # Job 2: Patch image (only when scan fails due to CVEs)
+  # Job 2: Publish original image (scan passed — no CVEs found)
+  # ----------------------------------------------------------------------------
+  publish_original:
+    name: Publish to Registry (Original)
+    runs-on: ubuntu-latest
+    needs: scan
+    if: always() && needs.scan.outputs.has_cves == 'false'
+
+    steps:
+      - name: Pull image
+        run: podman pull "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}"
+
+      - name: Login to registry
+        run: |
+          # podman login localhost:8083 \
+          #   --username "${{ secrets.NEXUS_USER }}" \
+          #   --password-stdin \
+          #   --tls-verify=false
+          echo "Simulated login: localhost:8083"
+
+      - name: Tag image for registry
+        run: |
+          podman tag \
+            "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}" \
+            "localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}"
+
+      - name: Push to registry
+        run: |
+          # podman push --tls-verify=false "localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}"
+          echo "Simulated push: localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}"
+
+      - name: Job summary
+        run: |
+          {
+            echo "## Published successfully"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Image** | \`${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}\` |"
+            echo "| **Registry** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}\` |"
+            echo "| **Severity gate** | \`${{ inputs.severity }}\` |"
+            echo "| **Patched** | No — original image passed the scan |"
+            echo ""
+            echo "### Pull from registry"
+            echo '```'
+            echo "podman pull --tls-verify=false localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ----------------------------------------------------------------------------
+  # Job 3: Patch image (scan found CVEs)
   # Detects the container OS via /etc/os-release, generates a Dockerfile
   # with FROM <source_image> + OS package update, and builds a patched image.
   # ----------------------------------------------------------------------------
@@ -66,7 +129,7 @@ jobs:
     name: Patch Image (OS & Language pkg Update)
     runs-on: ubuntu-latest
     needs: scan
-    if: always() && needs.scan.result == 'failure'
+    if: always() && needs.scan.outputs.has_cves == 'true'
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
       PATCHED_IMAGE: ${{ inputs.image_name }}:${{ inputs.tag }}-patched
@@ -92,14 +155,14 @@ jobs:
           retention-days: 1
 
   # ----------------------------------------------------------------------------
-  # Job 3: Rescan the patched image
+  # Job 4: Rescan the patched image
   # Same severity gate as the original scan.
   # Fails if CVEs remain after the OS update.
   # ----------------------------------------------------------------------------
   rescan:
     name: CVE Rescan (Patched)
     runs-on: ubuntu-latest
-    needs: [scan, patch]
+    needs: patch
     if: always() && needs.patch.result == 'success'
     env:
       PATCHED_IMAGE: ${{ inputs.image_name }}:${{ inputs.tag }}-patched
@@ -125,43 +188,22 @@ jobs:
           baseline_artifact: trivy-results-json
 
   # ----------------------------------------------------------------------------
-  # Job 4: Publish to registry
-  # Runs when either the original scan passed or the patched rescan passed.
-  # Resolves which image to push at runtime: original tag when scan passed,
-  # <tag>-patched when rescan passed.
-  # NOTE: podman push is commented out — registry is simulated (localhost:8083).
+  # Job 5: Publish patched image (rescan passed — CVEs fixed)
   # ----------------------------------------------------------------------------
-  publish:
-    name: Publish to Registry
+  publish_patched:
+    name: Publish to Registry (Patched)
     runs-on: ubuntu-latest
-    needs: [scan, rescan]
-    if: always() && (needs.scan.result == 'success' || needs.rescan.result == 'success')
+    needs: rescan
+    if: always() && needs.rescan.result == 'success'
 
     steps:
-      - name: Resolve image to publish
-        id: vars
-        run: |
-          if [ "${{ needs.scan.result }}" = "success" ]; then
-            echo "source=${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "nexus_target=localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "source=${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
-            echo "nexus_target=localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Pull source image
-        if: needs.scan.result == 'success'
-        run: podman pull "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}"
-
       - name: Download patched image artifact
-        if: needs.rescan.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: patched-image
           path: /tmp/
 
       - name: Load patched image
-        if: needs.rescan.result == 'success'
         run: podman load -i /tmp/patched-image.tar
 
       - name: Login to registry
@@ -173,24 +215,30 @@ jobs:
           echo "Simulated login: localhost:8083"
 
       - name: Tag image for registry
-        run: podman tag "${{ steps.vars.outputs.source }}" "${{ steps.vars.outputs.nexus_target }}"
+        run: |
+          podman tag \
+            "${{ inputs.image_name }}:${{ inputs.tag }}-patched" \
+            "localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched"
 
       - name: Push to registry
         run: |
-          # podman push --tls-verify=false "${{ steps.vars.outputs.nexus_target }}"
-          echo "Simulated push: ${{ steps.vars.outputs.nexus_target }}"
+          # podman push --tls-verify=false "localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched"
+          echo "Simulated push: localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched"
 
       - name: Job summary
         run: |
-          echo "## Published successfully" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| | |" >> $GITHUB_STEP_SUMMARY
-          echo "|---|---|" >> $GITHUB_STEP_SUMMARY
-          echo "| **Source** | \`${{ steps.vars.outputs.source }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Registry** | \`${{ steps.vars.outputs.nexus_target }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| **Severity gate** | \`${{ inputs.severity }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Pull from registry" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
-          echo "podman pull --tls-verify=false ${{ steps.vars.outputs.nexus_target }}" >> $GITHUB_STEP_SUMMARY
-          echo '```' >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## Published successfully (Patched)"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Image** | \`${{ inputs.image_name }}:${{ inputs.tag }}-patched\` |"
+            echo "| **Registry** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched\` |"
+            echo "| **Severity gate** | \`${{ inputs.severity }}\` |"
+            echo "| **Patched** | Yes — original image had CVEs, rescan passed after patching |"
+            echo ""
+            echo "### Pull from registry"
+            echo '```'
+            echo "podman pull --tls-verify=false localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
