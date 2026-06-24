@@ -18,6 +18,10 @@ inputs:
     description: "Set to 'true' when tar_path already exists (downloaded as artifact) — skips podman save"
     required: false
     default: 'false'
+  baseline_artifact:
+    description: "Artifact name of the original scan JSON (enables Fixed CVEs section in the rescan summary)"
+    required: false
+    default: ''
 
 runs:
   using: composite
@@ -68,11 +72,19 @@ runs:
         name: ${{ inputs.artifact_name }}
         path: trivy-results.sarif
 
+    - name: Download baseline scan JSON
+      if: always() && inputs.baseline_artifact != ''
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.baseline_artifact }}
+        path: /tmp/baseline/
+
     - name: Job summary
       if: always()
       shell: bash
       run: |
-        TRIVY_JSON="${{ inputs.tar_path }}.json"
+        TRIVY_JSON="/tmp/trivy-scan.json"
+        BASELINE_JSON="/tmp/baseline/trivy-scan.json"
 
         # Re-scan without --ignore-unfixed to capture ALL CVEs (fixable + not fixable).
         # DB is already cached from the scan step above — this is fast.
@@ -171,3 +183,56 @@ runs:
               "No CVEs without a fix found at severity `\($severity)`."
             end
           ' "$TRIVY_JSON" >> "$GITHUB_STEP_SUMMARY" || true
+
+        # ── Fixed CVEs (rescan only) ──────────────────────────────────────────
+        if [[ -f "$BASELINE_JSON" ]]; then
+          jq -r \
+            --slurpfile current "$TRIVY_JSON" \
+            '
+              # CVE IDs still present in the patched image — build a lookup index
+              ([$current[0].Results[] | .Vulnerabilities[]? | .VulnerabilityID] | INDEX(.)) as $cur_idx |
+
+              # CVEs from the original scan that are no longer in the patched image
+              [.Results[] | .Vulnerabilities[]? |
+               select(.VulnerabilityID | in($cur_idx) | not)] as $fixed |
+
+              ($fixed | map(select(.Severity == "CRITICAL")) | length) as $f_crit |
+              ($fixed | map(select(.Severity == "HIGH"))     | length) as $f_high |
+              ($fixed | map(select(.Severity == "MEDIUM"))   | length) as $f_med  |
+              ($fixed | length) as $n_fixed |
+
+              "",
+              "### ✅ Fixed CVEs (\($n_fixed))",
+              "",
+              if $n_fixed > 0 then
+                (if $f_crit > 0 then "> **CRITICAL fixed:** \($f_crit)" else empty end),
+                (if $f_high > 0 then "> **HIGH fixed:** \($f_high)"     else empty end),
+                (if $f_med  > 0 then "> **MEDIUM fixed:** \($f_med)"    else empty end),
+                "",
+                "| Package | CVE | Severity | Was Installed | Fix |",
+                "|---------|-----|----------|---------------|-----|",
+                (
+                  $fixed |
+                  sort_by([
+                    (if   .Severity == "CRITICAL" then 0
+                     elif .Severity == "HIGH"     then 1
+                     elif .Severity == "MEDIUM"   then 2
+                     else 3 end),
+                    .PkgName
+                  ]) |
+                  .[] |
+                  "| `\(.PkgName)` | [\(.VulnerabilityID)](https://avd.aquasec.com/nvd/\(.VulnerabilityID | ascii_downcase)) | \(.Severity) | \(.InstalledVersion) | \(.FixedVersion // "—") |"
+                )
+              else
+                "No CVEs were resolved by the patch."
+              end
+            ' "$BASELINE_JSON" >> "$GITHUB_STEP_SUMMARY" || true
+        fi
+
+    - name: Upload scan JSON
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}-json
+        path: /tmp/trivy-scan.json
+        retention-days: 1

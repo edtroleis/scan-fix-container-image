@@ -19,9 +19,11 @@ run_second_pass() {
     local build_dir="$5"
 
     if ! command -v trivy &>/dev/null; then
-        echo "==> trivy not found — using first-pass result."
-        podman tag "$pass1_image" "$output_image"
-        return 0
+        echo "==> trivy not found — installing ..."
+        mkdir -p "$HOME/.local/bin"
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b "$HOME/.local/bin"
+        export PATH="$HOME/.local/bin:$PATH"
     fi
 
     if ! command -v jq &>/dev/null; then

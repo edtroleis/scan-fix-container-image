@@ -62,7 +62,7 @@ jobs:
   # with FROM <source_image> + OS package update, and builds a patched image.
   # ----------------------------------------------------------------------------
   patch:
-    name: Patch Image (OS Update)
+    name: Patch Image (OS & Language pkg Update)
     runs-on: ubuntu-latest
     needs: scan
     if: always() && needs.scan.result == 'failure'
@@ -121,6 +121,7 @@ jobs:
           artifact_name: trivy-results-patched
           severity: ${{ inputs.severity }}
           skip_save: 'true'
+          baseline_artifact: trivy-results-json
 
   # ----------------------------------------------------------------------------
   # Job 4: Publish to registry
