@@ -26,7 +26,7 @@ rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/*
 SCRIPT
             ;;
 
-        rhel|centos|rocky|almalinux|fedora|amzn)
+        rhel|centos|rocky|almalinux|fedora|amzn|ol)
             # --nobest --skip-broken: avoids breaking version-pinned deps common
             # in AI/GPU images where strict pins cannot be satisfied by latest.
             cat > "$build_dir/run-update.sh" <<'SCRIPT'
@@ -68,12 +68,14 @@ SCRIPT
 get_trivy_os_type() {
     local os_id="$1"
     case "$os_id" in
-        rhel|centos|rocky|almalinux|fedora|amzn) echo "redhat" ;;
-        ubuntu)                                   echo "ubuntu" ;;
-        debian)                                   echo "debian" ;;
-        alpine)                                   echo "alpine" ;;
-        opensuse*|sles)                           echo "suse"   ;;
-        *)                                        echo "unknown" ;;
+        rhel|centos|rocky|almalinux|fedora) echo "redhat" ;;
+        amzn)                               echo "amazon" ;;
+        ol)                                 echo "oracle" ;;
+        ubuntu)                             echo "ubuntu" ;;
+        debian)                             echo "debian" ;;
+        alpine)                             echo "alpine" ;;
+        opensuse*|sles)                     echo "suse"   ;;
+        *)                                  echo "unknown" ;;
     esac
 }
 
@@ -87,7 +89,7 @@ write_targeted_upgrade_script() {
 
     case "$os_id" in
 
-        rhel|centos|rocky|almalinux|fedora|amzn)
+        rhel|centos|rocky|almalinux|fedora|amzn|ol)
             cat > "$build_dir/run-targeted.sh" <<SCRIPT
 #!/bin/sh
 set -e
