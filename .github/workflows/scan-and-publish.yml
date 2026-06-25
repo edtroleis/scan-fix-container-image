@@ -33,14 +33,14 @@ jobs:
 
   # ----------------------------------------------------------------------------
   # Job 1: Scan original image
-  # The Scan step runs with continue-on-error so the job always exits 0.
-  # A subsequent step captures whether CVEs were found into the has_cves output.
-  # Downstream jobs route on has_cves — NOT on scan.result — so the overall
-  # workflow run is SUCCESS whenever the rescan passes (CVEs fixed).
+  # continue-on-error on the JOB lets downstream jobs run and outputs pass
+  # through even when the job fails. The job shows ❌ when CVEs are found.
+  # Downstream jobs route on has_cves output — NOT on scan.result.
   # ----------------------------------------------------------------------------
   scan:
     name: CVE Scan
     runs-on: ubuntu-latest
+    continue-on-error: true
     outputs:
       has_cves: ${{ steps.has_cves.outputs.has_cves }}
     env:
@@ -55,7 +55,6 @@ jobs:
 
       - name: Scan
         id: scan
-        continue-on-error: true
         uses: ./.github/actions/trivy-scan
         with:
           image: ${{ env.SOURCE_IMAGE }}
@@ -65,12 +64,17 @@ jobs:
 
       - name: Set has_cves output
         id: has_cves
+        if: always()
         run: |
           if [[ "${{ steps.scan.outcome }}" == "failure" ]]; then
             echo "has_cves=true" >> "$GITHUB_OUTPUT"
           else
             echo "has_cves=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Fail job when CVEs found
+        if: always() && steps.has_cves.outputs.has_cves == 'true'
+        run: exit 1
 
   # ----------------------------------------------------------------------------
   # Job 2: Publish original image (scan passed — no CVEs found)
@@ -119,14 +123,14 @@ jobs:
       - name: Job summary
         run: |
           {
-            echo "## Published successfully"
+            echo "## ✅ Pipeline Result: No CVEs Found — Image Approved"
             echo ""
             echo "| | |"
             echo "|---|---|"
             echo "| **Image** | \`${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}\` |"
-            echo "| **Registry** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}\` |"
             echo "| **Severity gate** | \`${{ inputs.severity }}\` |"
-            echo "| **Patched** | No — original image passed the scan |"
+            echo "| **Result** | ✅ Passed — original image had no fixable CVEs |"
+            echo "| **Patched** | No — published as-is |"
             echo "| **Image size** | ${ORIG_SIZE} |"
             echo ""
             echo "### Pull from registry"
@@ -265,18 +269,21 @@ jobs:
       - name: Job summary
         run: |
           {
-            echo "## Published successfully (Patched)"
+            echo "## ✅ Pipeline Result: CVEs Fixed — Image Approved"
             echo ""
             echo "| | |"
             echo "|---|---|"
-            echo "| **Image** | \`${{ inputs.image_name }}:${{ inputs.tag }}-patched\` |"
-            echo "| **Registry** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched\` |"
+            echo "| **Image** | \`${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}\` |"
             echo "| **Severity gate** | \`${{ inputs.severity }}\` |"
-            echo "| **Patched** | Yes — original image had CVEs, rescan passed after patching |"
+            echo "| **Result** | ✅ Patched — original image had CVEs, rescan passed after patching |"
             echo "| **Original image size** | ${ORIG_SIZE} |"
             echo "| **Patched image size** | ${PATCH_SIZE} |"
+            echo "| **Published to** | \`localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched\` |"
             echo ""
-            echo "### Pull from registry"
+            echo "> See **CVE Scan** job summary for the full vulnerability report."
+            echo "> See **CVE Rescan (Patched)** job summary for fixed CVEs and remaining unfixable CVEs."
+            echo ""
+            echo "### Pull patched image"
             echo '```'
             echo "podman pull --tls-verify=false localhost:8083/${{ inputs.image_name }}:${{ inputs.tag }}-patched"
             echo '```'

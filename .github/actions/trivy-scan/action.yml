@@ -51,7 +51,12 @@ runs:
           --severity "${{ inputs.severity }}" \
           --ignore-unfixed \
           --format table \
-          --input "${{ inputs.tar_path }}"
+          --input "${{ inputs.tar_path }}" || TRIVY_RC=$?
+        TRIVY_RC=${TRIVY_RC:-0}
+        # Trivy v0.71+ exit code 5 = results exist but all filtered by
+        # --ignore-unfixed (no fixable CVEs remain). Treat as success.
+        if [[ $TRIVY_RC -eq 5 ]]; then exit 0; fi
+        exit $TRIVY_RC
 
     - name: Scan summary (SARIF)
       if: always()
