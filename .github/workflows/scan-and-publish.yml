@@ -65,11 +65,14 @@ jobs:
       - name: Login to registry
         if: inputs.registry == 'dhi.io'
         run: |
+          # dhi.io authenticates via Docker Hub as the identity provider.
+          # Login to Docker Hub (no registry URL); Docker's token exchange then
+          # grants access to pull from dhi.io. Podman falls back to
+          # ~/.docker/config.json, so subsequent podman pull also works.
           echo "${{ secrets.DHI_PASSWORD }}" | \
-            docker login dhi.io \
+            docker login \
               --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
-          # podman falls back to ~/.docker/config.json, so subsequent podman pull works
 
       - name: Pull image
         id: pull
@@ -207,11 +210,14 @@ jobs:
       - name: Login to registry
         if: inputs.registry == 'dhi.io'
         run: |
+          # dhi.io authenticates via Docker Hub as the identity provider.
+          # Login to Docker Hub (no registry URL); Docker's token exchange then
+          # grants access to pull from dhi.io. Podman falls back to
+          # ~/.docker/config.json, so subsequent podman pull also works.
           echo "${{ secrets.DHI_PASSWORD }}" | \
-            docker login dhi.io \
+            docker login \
               --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
-          # podman falls back to ~/.docker/config.json, so subsequent podman pull works
 
       - name: Pull image
         run: podman pull "$SOURCE_IMAGE"
