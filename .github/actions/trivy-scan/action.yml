@@ -41,7 +41,13 @@ runs:
       shell: bash
       run: |
         rm -f "${{ inputs.tar_path }}"
-        podman save --format oci-archive "${{ inputs.image }}" -o "${{ inputs.tar_path }}"
+        if docker image inspect "${{ inputs.image }}" &>/dev/null 2>&1; then
+          docker save "${{ inputs.image }}" -o "${{ inputs.tar_path }}"
+        else
+          skopeo copy \
+            "containers-storage:${{ inputs.image }}" \
+            "docker-archive:${{ inputs.tar_path }}"
+        fi
 
     - name: Scan for CVEs
       shell: bash

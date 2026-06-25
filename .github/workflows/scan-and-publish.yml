@@ -68,13 +68,18 @@ jobs:
           DHI_PASSWORD: ${{ secrets.DHI_PASSWORD }}
         run: |
           echo "$DHI_PASSWORD" | \
-            podman login dhi.io \
+            docker login dhi.io \
               --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
 
       - name: Pull image
         id: pull
-        run: podman pull "$SOURCE_IMAGE"
+        run: |
+          if [[ "${{ inputs.registry }}" == "dhi.io" ]]; then
+            docker pull "$SOURCE_IMAGE"
+          else
+            podman pull "$SOURCE_IMAGE"
+          fi
 
       - name: Scan
         id: scan
@@ -218,12 +223,18 @@ jobs:
           DHI_PASSWORD: ${{ secrets.DHI_PASSWORD }}
         run: |
           echo "$DHI_PASSWORD" | \
-            podman login dhi.io \
+            docker login dhi.io \
               --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
 
       - name: Pull image
-        run: podman pull "$SOURCE_IMAGE"
+        run: |
+          if [[ "${{ inputs.registry }}" == "dhi.io" ]]; then
+            docker pull "$SOURCE_IMAGE"
+            skopeo copy docker-daemon:"$SOURCE_IMAGE" containers-storage:"$SOURCE_IMAGE"
+          else
+            podman pull "$SOURCE_IMAGE"
+          fi
 
       - name: Build patched image
         run: bash patch-image.sh "$SOURCE_IMAGE" "$PATCHED_IMAGE"
