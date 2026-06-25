@@ -58,7 +58,72 @@ jobs:
           severity: ${{ inputs.severity }}
 
   # ----------------------------------------------------------------------------
-  # Job 2: Publish original image (scan passed — no CVEs found)
+  # Job 2: EPSS Risk Assessment
+  # Runs always after scan. Parses the CVE JSON artifact and generates an EPSS
+  # section showing which CVEs carry the highest active-exploitation probability.
+  # ----------------------------------------------------------------------------
+  epss:
+    name: EPSS Risk Assessment
+    runs-on: ubuntu-latest
+    needs: scan
+    if: always()
+
+    steps:
+      - name: Download scan JSON
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          name: trivy-results-json
+          path: /tmp/
+
+      - name: EPSS summary
+        run: |
+          TRIVY_JSON="/tmp/trivy-scan.json"
+
+          if [[ ! -s "$TRIVY_JSON" ]]; then
+            {
+              echo "## EPSS Risk Assessment"
+              echo ""
+              echo "_No scan data available — JSON artifact was empty or missing._"
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          jq -r \
+            --arg image "${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}" \
+            '
+              [.Results[] | .Vulnerabilities[]? |
+               select(.EPSS != null and (.EPSS | length) > 0)] as $with_epss |
+
+              ($with_epss | sort_by(-.EPSS[0].EPSS)) as $sorted |
+              ($with_epss | length) as $n_epss |
+
+              "## EPSS Risk Assessment — `\($image)`",
+              "",
+              "> **What is EPSS?** The Exploit Prediction Scoring System (EPSS) estimates the probability",
+              "> (0 to 1) that a CVE will be exploited in the wild within the next 30 days.",
+              "> A score of `0.90` means a 90% chance of active exploitation.",
+              "> The **Percentile** ranks the CVE against all scored CVEs — a 99th percentile means",
+              "> only 1% of known CVEs carry a higher exploitation risk.",
+              "> Use EPSS alongside severity to prioritize remediation: a MEDIUM-severity CVE with a",
+              "> high EPSS score may be more urgent than a CRITICAL one with a near-zero score.",
+              "",
+              if $n_epss == 0 then
+                "_No EPSS data found for any CVE in this scan. EPSS requires Trivy v0.45 or newer._"
+              else
+                "CVEs with EPSS data: **\($n_epss)**. Sorted by exploitation probability (highest first, top 20 shown).",
+                "",
+                "| CVE | Package | Severity | EPSS Score | Percentile |",
+                "|-----|---------|----------|------------|------------|",
+                (
+                  $sorted[:20] | .[] |
+                  "| [\(.VulnerabilityID)](https://avd.aquasec.com/nvd/\(.VulnerabilityID | ascii_downcase)) | `\(.PkgName)` | \(.Severity) | \(.EPSS[0].EPSS) | \(.EPSS[0].Percentile * 100 | floor)th |"
+                )
+              end
+            ' "$TRIVY_JSON" >> "$GITHUB_STEP_SUMMARY" || true
+
+  # ----------------------------------------------------------------------------
+  # Job 3: Publish original image (scan passed — no CVEs found)
   # ----------------------------------------------------------------------------
   publish_original:
     name: Publish to Registry (Original)
@@ -121,7 +186,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   # ----------------------------------------------------------------------------
-  # Job 3: Patch image (scan found CVEs)
+  # Job 4: Patch image (scan found CVEs)
   # Detects the container OS via /etc/os-release, generates a Dockerfile
   # with FROM <source_image> + OS package update, and builds a patched image.
   # ----------------------------------------------------------------------------
@@ -160,7 +225,7 @@ jobs:
           retention-days: 1
 
   # ----------------------------------------------------------------------------
-  # Job 4: Rescan the patched image
+  # Job 5: Rescan the patched image
   # Same severity gate as the original scan.
   # Fails if CVEs remain after the OS update.
   # ----------------------------------------------------------------------------
@@ -193,7 +258,7 @@ jobs:
           baseline_artifact: trivy-results-json
 
   # ----------------------------------------------------------------------------
-  # Job 5: Publish patched image (rescan passed — CVEs fixed)
+  # Job 6: Publish patched image (rescan passed — CVEs fixed)
   # ----------------------------------------------------------------------------
   publish_patched:
     name: Publish to Registry (Patched)

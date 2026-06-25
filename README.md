@@ -17,9 +17,8 @@ Scan public container images for CVEs using Trivy and automatically patch them b
 - [Running the pipeline](#running-the-pipeline)
 - [Supported OS families](#supported-os-families)
 - [Language-level package upgrades](#language-level-package-upgrades)
-- [Test images](#test-images)
 - [Scripts](#scripts)
-- [Test pipeline workflow](#test-pipeline-workflow)
+- [Tests](tests.md)
 
 ---
 
@@ -218,57 +217,6 @@ After the OS package update, `patch-image.sh` appends a best-effort upgrade bloc
 
 ---
 
-<a id="test-images"></a>
-
-## Test images
-
-| # | Registry | Image name | Tag | Type | Category | Result |
-|---|---|---|---|---|---|---|
-| 1 | `docker.io` | `library/ubuntu` | `22.04` | Official | Base OS — Ubuntu LTS (older)| ✅ Patched (CVEs fixed) |
-| 2 | `docker.io` | `library/ubuntu` | `24.04` | Official | Base OS — Ubuntu LTS (current)| ✅ Patched (CVEs fixed) |
-| 3 | `docker.io` | `library/debian` | `bullseye` | Official | Base OS — Debian 11 (older)| ✅ Passed (no CVEs) |
-| 4 | `docker.io` | `library/debian` | `bookworm-slim` | Official | Base OS — Debian 12 slim| ✅ Passed (no CVEs) |
-| 5 | `docker.io` | `library/alpine` | `3.19` | Official | Base OS — Alpine (minimal)| ✅ Patched (CVEs fixed) |
-| 6 | `docker.io` | `library/amazonlinux` | `2023` | Official | Base OS — Amazon Linux 2023 (DNF)| ❌ Failed (CVEs remain) |
-| 7 | `docker.io` | `library/fedora` | `40` | Official | Base OS — Fedora (DNF)| ✅ Passed (no CVEs) |
-| 8 | `docker.io` | `library/python` | `3.11-bullseye` | Official | Language — Python on Debian 11| ❌ Failed (CVEs remain) |
-| 9 | `docker.io` | `library/python` | `3.12-slim` | Official | Language — Python slim| ✅ Passed (no CVEs) |
-| 10 | `docker.io` | `library/node` | `20-slim` | Official | Language — Node.js slim| ❌ Failed (CVEs remain) |
-| 11 | `docker.io` | `library/node` | `18-alpine` | Official | Language — Node.js on Alpine| ❌ Failed (CVEs remain) |
-| 12 | `docker.io` | `library/golang` | `1.22-alpine` | Official | Language — Go on Alpine| ❌ Failed (CVEs remain) |
-| 13 | `docker.io` | `library/nginx` | `1.26-alpine` | Official | Web server — Nginx on Alpine| ✅ Patched (CVEs fixed) |
-| 14 | `docker.io` | `library/httpd` | `2.4` | Official | Web server — Apache| ✅ Passed (no CVEs) |
-| 15 | `docker.io` | `library/postgres` | `15` | Official | Database — PostgreSQL 15| ❌ Failed (CVEs remain) |
-| 16 | `docker.io` | `library/mysql` | `8.0` | Official | Database — MySQL 8.0| ❌ Failed (patch error) |
-| 17 | `docker.io` | `library/redis` | `7-alpine` | Official | Cache — Redis 7 on Alpine| ✅ Passed (no CVEs) |
-| 18 | `docker.io` | `library/mariadb` | `11` | Official | Database — MariaDB 11| ❌ Failed (CVEs remain) |
-| 19 | `docker.io` | `library/rabbitmq` | `3-alpine` | Official | Message broker — RabbitMQ| ✅ Patched (CVEs fixed) |
-| 20 | `docker.io` | `library/traefik` | `v3.2` | Official | Reverse proxy (gobinary CVEs expected)| ❌ Failed (CVEs remain) |
-| 21 | `docker.io` | `library/redis` | `6.2-alpine` | Official | Cache — Redis 6.2 (older)| ✅ Passed (no CVEs) |
-| 22 | `docker.io` | `library/redis` | `7.0-alpine` | Official | Cache — Redis 7.0| ❌ Failed (CVEs remain) |
-| 23 | `docker.io` | `library/redis` | `7.4-alpine` | Official | Cache — Redis 7.4| ✅ Passed (no CVEs) |
-| 24 | `docker.io` | `library/mongo` | `6` | Official | Database — MongoDB 6| ❌ Failed (CVEs remain) |
-| 25 | `docker.io` | `library/mongo` | `7` | Official | Database — MongoDB 7| ❌ Failed (CVEs remain) |
-| 26 | `docker.io` | `library/mongo` | `8` | Official | Database — MongoDB 8| ❌ Failed (CVEs remain) |
-| 27 | `docker.io` | `prom/prometheus` | `v2.53.0` | Verified | Observability — Prometheus| ❌ Failed (CVEs remain) |
-| 28 | `docker.io` | `grafana/grafana` | `11.1.0` | Verified | Observability — Grafana| ❌ Failed (CVEs remain) |
-| 29 | `docker.io` | `grafana/loki` | `3.1.0` | Verified | Observability — Loki (log aggregation)| ❌ Failed (CVEs remain) |
-| 30 | `docker.io` | `grafana/tempo` | `2.5.0` | Verified | Observability — Tempo (distributed tracing)| ❌ Failed (CVEs remain) |
-| 31 | `docker.io` | `jaegertracing/all-in-one` | `1.60` | Verified | Observability — Jaeger tracing| ❌ Failed (CVEs remain) |
-| 32 | `docker.io` | `library/influxdb` | `2.7-alpine` | Official | Observability — InfluxDB time series| ❌ Failed (CVEs remain) |
-| 33 | `docker.io` | `library/memcached` | `alpine` | Official | Cache — Memcached| ✅ Passed (no CVEs) |
-| 34 | `docker.io` | `library/wordpress` | `php8.3-apache` | Official | CMS — WordPress| ✅ Passed (no CVEs) |
-| 35 | `docker.io` | `library/nginx` | `mainline-alpine` | Official | Web server — Nginx mainline| ✅ Passed (no CVEs) |
-| 36 | `docker.io` | `library/postgres` | `16-alpine` | Official | Database — PostgreSQL 16 Alpine| ❌ Failed (CVEs remain) |
-| 37 | `docker.io` | `library/mysql` | `9.0` | Official | Database — MySQL 9.0| ❌ Failed (patch error) |
-| 38 | `docker.io` | `library/cassandra` | `5` | Official | Database — Cassandra 5| ❌ Failed (CVEs remain) |
-| 39 | `docker.io` | `library/sonarqube` | `community` | Official | Code quality — SonarQube| ❌ Failed (CVEs remain) |
-| 40 | `docker.io` | `library/rabbitmq` | `3.13-management-alpine` | Official | Message broker — RabbitMQ with UI| ✅ Patched (CVEs fixed) |
-
-> **Result key:** ✅ Passed — scan found no CVEs at configured severity / ✅ Patched — scan failed but rescan after patching passed / ❌ Failed — CVEs remain after patching (gobinary or no fix available) / — not yet tested
-
----
-
 ## Scripts
 
 ### patch-image.sh
@@ -296,57 +244,6 @@ No environment variables or credentials are required — all package sources are
 | `lib/lang-packages.sh` | Appends language-runtime upgrade blocks (Python, Node.js, Java, Go) |
 | `lib/second-pass.sh` | Installs Trivy if absent, scans the pass-1 image, extracts remaining fixable packages, and builds a targeted second-pass image |
 
-### run-pipeline-tests.sh
-
-Triggers the scan-and-publish workflow for all 40 test images (or a subset) and saves
-the GitHub Actions run IDs to `pipeline-runs.tsv`. Returns immediately after triggering
-all workflows — does not wait for them to finish.
-
-```bash
-# Syntax
-./run-pipeline-tests.sh [from] [to] [severity]
-
-# Examples
-./run-pipeline-tests.sh                      # all 40 images, HIGH,CRITICAL
-./run-pipeline-tests.sh 1 10                 # images #1–#10 only
-./run-pipeline-tests.sh 1 40 CRITICAL        # all images, CRITICAL severity only
-DELAY=10 OUTPUT=my-run.tsv ./run-pipeline-tests.sh
-```
-
-Output: `pipeline-runs.tsv` — TSV file with columns `index`, `label`, `run_id`, `severity`.
-
-### pipeline-results.sh
-
-Reads `pipeline-runs.tsv`, waits for each GitHub Actions run to complete, classifies
-the result, prints a summary table, and updates the **Test images** table in `README.md`.
-
-```bash
-# Syntax
-./pipeline-results.sh [input.tsv] [README.md]
-
-# Examples
-./pipeline-results.sh                             # reads pipeline-runs.tsv, updates README.md
-./pipeline-results.sh my-run.tsv                  # custom input file
-./pipeline-results.sh pipeline-runs.tsv README.md # explicit paths
-POLL=30 TIMEOUT=45 ./pipeline-results.sh          # custom poll interval and timeout
-```
-
-Output files:
-- `pipeline-results.tsv` — TSV with columns `index`, `label`, `run_id`, `result`, `run_url`
-- `README.md` — Test images table updated with results and emoji status
-
-**Result values written to README:**
-
-| Result | Meaning |
-|---|---|
-| ✅ Passed (no CVEs) | Scan found no fixable CVEs at configured severity |
-| ✅ Patched (CVEs fixed) | CVEs were found, patched, and rescan passed |
-| ❌ Failed (CVEs remain) | CVEs were found, patched, but rescan still failed |
-| ❌ Failed (patch error) | Patch job itself failed |
-| ❌ Failed (scan error) | Scan job failed for a reason other than CVEs |
-| ⏱️ Timeout | Run did not complete within the timeout window |
-| — | Run was not triggered |
-
 ### check-os.sh
 
 Inspects a predefined list of images, detects the OS and installed language runtimes, and generates ready-to-use Dockerfiles under `updated/`.
@@ -354,3 +251,9 @@ Inspects a predefined list of images, detects the OS and installed language runt
 ```bash
 ./check-os.sh
 ```
+
+---
+
+## Tests
+
+See [tests.md](tests.md) for the full test image matrix and instructions on running and collecting pipeline test results.
