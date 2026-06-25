@@ -18,14 +18,18 @@ source "$SCRIPT_DIR/lib/os-packages.sh"
 source "$SCRIPT_DIR/lib/lang-packages.sh"
 # shellcheck source=lib/second-pass.sh
 source "$SCRIPT_DIR/lib/second-pass.sh"
+# shellcheck source=lib/gobinary-pass.sh
+source "$SCRIPT_DIR/lib/gobinary-pass.sh"
 
 # ── Setup ─────────────────────────────────────────────────────────────────────
 BUILD_DIR=$(mktemp -d)
 PASS1_IMAGE="patch-pass1-$$"   # temporary; removed after second pass
+PASS2_IMAGE="patch-pass2-$$"   # temporary; removed after gobinary pass
 
 cleanup() {
     [[ -n "${CONTAINER_ID:-}" ]] && podman rm -f "$CONTAINER_ID" >/dev/null 2>&1 || true
     podman rmi "$PASS1_IMAGE" >/dev/null 2>&1 || true
+    podman rmi "$PASS2_IMAGE" >/dev/null 2>&1 || true
     rm -rf "$BUILD_DIR"
 }
 trap cleanup EXIT
@@ -69,7 +73,10 @@ podman build \
     -f "$BUILD_DIR/Dockerfile" \
     "$BUILD_DIR"
 
-# ── Second-pass: upgrade packages that still have a fix after pass 1 ──────────
-run_second_pass "$PASS1_IMAGE" "$OUTPUT_IMAGE" "$OS_ID" "$RESTORE_USER" "$BUILD_DIR"
+# ── Second-pass: upgrade OS packages that still have a fix after pass 1 ───────
+run_second_pass "$PASS1_IMAGE" "$PASS2_IMAGE" "$OS_ID" "$RESTORE_USER" "$BUILD_DIR"
+
+# ── Gobinary-pass: rebuild Go binaries that still carry fixable CVEs ──────────
+run_gobinary_pass "$PASS2_IMAGE" "$OUTPUT_IMAGE" "$RESTORE_USER" "$BUILD_DIR"
 
 echo "==> Done: ${OUTPUT_IMAGE}"
