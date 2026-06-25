@@ -42,7 +42,8 @@ jobs:
     runs-on: ubuntu-latest
     continue-on-error: true
     outputs:
-      has_cves: ${{ steps.has_cves.outputs.has_cves }}
+      has_cves:   ${{ steps.set_outputs.outputs.has_cves }}
+      scan_error: ${{ steps.set_outputs.outputs.scan_error }}
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
 
@@ -51,6 +52,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Pull image
+        id: pull
         run: podman pull "$SOURCE_IMAGE"
 
       - name: Scan
@@ -62,19 +64,44 @@ jobs:
           artifact_name: trivy-results
           severity: ${{ inputs.severity }}
 
-      - name: Set has_cves output
-        id: has_cves
+      - name: Set outputs
+        id: set_outputs
         if: always()
         run: |
-          if [[ "${{ steps.scan.outcome }}" == "failure" ]]; then
-            echo "has_cves=true" >> "$GITHUB_OUTPUT"
+          pull="${{ steps.pull.outcome }}"
+          scan="${{ steps.scan.outcome }}"
+          # Pull or setup failure (non-CVE error) — fail fast, skip all downstream
+          if [[ "$pull" != "success" ]]; then
+            echo "scan_error=true"  >> "$GITHUB_OUTPUT"
+            echo "has_cves=false"   >> "$GITHUB_OUTPUT"
+          elif [[ "$scan" == "failure" ]]; then
+            echo "scan_error=false" >> "$GITHUB_OUTPUT"
+            echo "has_cves=true"    >> "$GITHUB_OUTPUT"
           else
-            echo "has_cves=false" >> "$GITHUB_OUTPUT"
+            echo "scan_error=false" >> "$GITHUB_OUTPUT"
+            echo "has_cves=false"   >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Fail job when CVEs found
-        if: always() && steps.has_cves.outputs.has_cves == 'true'
+      - name: Fail job (CVEs found or scan error)
+        if: always() && (steps.set_outputs.outputs.has_cves == 'true' || steps.set_outputs.outputs.scan_error == 'true')
         run: exit 1
+
+  # ----------------------------------------------------------------------------
+  # Job 1b: Fail fast when scan encountered a non-CVE error (bad image ref,
+  # pull failure, etc.). Runs immediately after scan, exits 1 so the overall
+  # workflow run is marked ❌ without waiting for patch/rescan/publish.
+  # ----------------------------------------------------------------------------
+  report_error:
+    name: Pipeline Error (Scan Failed)
+    runs-on: ubuntu-latest
+    needs: scan
+    if: always() && needs.scan.outputs.scan_error == 'true'
+    steps:
+      - name: Fail fast
+        run: |
+          echo "::error::CVE Scan encountered a non-CVE error (image pull failed or scan setup failed)."
+          echo "::error::Check the image reference and registry inputs."
+          exit 1
 
   # ----------------------------------------------------------------------------
   # Job 2: Publish original image (scan passed — no CVEs found)
@@ -83,7 +110,7 @@ jobs:
     name: Publish to Registry (Original)
     runs-on: ubuntu-latest
     needs: scan
-    if: needs.scan.outputs.has_cves == 'false'
+    if: needs.scan.outputs.has_cves == 'false' && needs.scan.outputs.scan_error != 'true'
 
     steps:
       - name: Pull image
@@ -148,7 +175,7 @@ jobs:
     name: Patch Image (OS & Language pkg Update)
     runs-on: ubuntu-latest
     needs: scan
-    if: needs.scan.outputs.has_cves == 'true'
+    if: needs.scan.outputs.has_cves == 'true' && needs.scan.outputs.scan_error != 'true'
     env:
       SOURCE_IMAGE: ${{ inputs.registry }}/${{ inputs.image_name }}:${{ inputs.tag }}
       PATCHED_IMAGE: ${{ inputs.image_name }}:${{ inputs.tag }}-patched
