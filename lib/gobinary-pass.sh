@@ -73,8 +73,11 @@ while IFS= read -r rel_path; do
 
     module=$(go version -m "$abs" 2>/dev/null \
              | awk '/^[[:space:]]*path[[:space:]]/ { print $2; exit }')
-    if [ -z "$module" ]; then
-        echo "    skip (no module path): ${abs}"
+    # "command-line-arguments" means the binary was compiled with `go build .`
+    # directly — no canonical module path embedded. Cannot be reconstructed
+    # via go install (MongoDB tools are compiled this way).
+    if [ -z "$module" ] || [ "$module" = "command-line-arguments" ]; then
+        echo "    skip (no installable module path): ${abs}"
         continue
     fi
 
