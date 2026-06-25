@@ -29,11 +29,17 @@ SCRIPT
         rhel|centos|rocky|almalinux|fedora|amzn|ol)
             # --nobest --skip-broken: avoids breaking version-pinned deps common
             # in AI/GPU images where strict pins cannot be satisfied by latest.
+            # Slim images (e.g. mysql:8.0 on Oracle Linux 9) ship microdnf only.
             cat > "$build_dir/run-update.sh" <<'SCRIPT'
 #!/bin/sh
 set -e
-dnf upgrade -y --nodocs --setopt=install_weak_deps=False --nobest --skip-broken
-dnf clean all && rm -rf /var/cache/dnf
+if command -v dnf >/dev/null 2>&1; then
+    dnf upgrade -y --nodocs --setopt=install_weak_deps=False --nobest --skip-broken
+    dnf clean all && rm -rf /var/cache/dnf
+elif command -v microdnf >/dev/null 2>&1; then
+    microdnf upgrade -y --nodocs
+    microdnf clean all && rm -rf /var/cache/dnf
+fi
 SCRIPT
             ;;
 
@@ -93,8 +99,13 @@ write_targeted_upgrade_script() {
             cat > "$build_dir/run-targeted.sh" <<SCRIPT
 #!/bin/sh
 set -e
-dnf upgrade -y --nodocs --setopt=install_weak_deps=False ${packages}
-dnf clean all && rm -rf /var/cache/dnf
+if command -v dnf >/dev/null 2>&1; then
+    dnf upgrade -y --nodocs --setopt=install_weak_deps=False ${packages}
+    dnf clean all && rm -rf /var/cache/dnf
+elif command -v microdnf >/dev/null 2>&1; then
+    microdnf upgrade -y --nodocs ${packages}
+    microdnf clean all && rm -rf /var/cache/dnf
+fi
 SCRIPT
             ;;
 
