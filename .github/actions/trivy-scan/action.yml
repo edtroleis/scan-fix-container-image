@@ -185,16 +185,24 @@ runs:
           ' "$TRIVY_JSON" >> "$GITHUB_STEP_SUMMARY" || true
 
         # ── EPSS Risk Assessment ──────────────────────────────────────────────
-        # Trivy's EPSS field is omitted when not in its local DB.
-        # Fetch scores directly from the FIRST.org public API using the CVE IDs
-        # that Trivy already found — this is always up-to-date and reliable.
-        EPSS_FILE="/tmp/epss-api.json"
+        # The FIRST.org REST API now requires authentication.
+        # Use the public daily EPSS CSV from epss.cyentia.com instead:
+        # download → decompress → grep to only our CVEs → convert to JSON → join.
+        EPSS_FILE="/tmp/epss-filtered.json"
 
-        CVE_LIST=$(jq -r '[.Results[] | .Vulnerabilities[]? | .VulnerabilityID] | unique[:200] | join(",")' "$TRIVY_JSON")
+        jq -r '[.Results[] | .Vulnerabilities[]? | .VulnerabilityID] | unique | .[]' \
+          "$TRIVY_JSON" > /tmp/scan-cves.txt
 
-        if [[ -n "$CVE_LIST" ]]; then
-          curl -sf "https://api.first.org/data/1.0/epss?cve=${CVE_LIST}&limit=2000" \
-            -o "$EPSS_FILE" 2>/dev/null || echo '{"data":[]}' > "$EPSS_FILE"
+        if [[ -s /tmp/scan-cves.txt ]]; then
+          curl -sfL --max-time 60 "https://epss.cyentia.com/epss_scores-current.csv.gz" \
+            | gunzip 2>/dev/null \
+            | grep -Ff /tmp/scan-cves.txt \
+            | awk -F',' \
+                'BEGIN { printf "{\"data\":[" }
+                 NR > 1 { printf "," }
+                 { printf "{\"cve\":\"%s\",\"epss\":%s,\"percentile\":%s}", $1, $2, $3 }
+                 END   { printf "]}" }' \
+            > "$EPSS_FILE" || echo '{"data":[]}' > "$EPSS_FILE"
         else
           echo '{"data":[]}' > "$EPSS_FILE"
         fi
@@ -203,7 +211,7 @@ runs:
           --slurpfile scan "$TRIVY_JSON" \
           '
             (.data // [] |
-             map({key: .cve, value: {epss: (.epss | tonumber), percentile: (.percentile | tonumber)}}) |
+             map({key: .cve, value: {epss: .epss, percentile: .percentile}}) |
              from_entries) as $epss_idx |
 
             [$scan[0].Results[] | .Vulnerabilities[]?] as $all |
@@ -229,7 +237,7 @@ runs:
             "> high EPSS score may be more urgent than a CRITICAL one with a near-zero score.",
             "",
             if $n_epss == 0 then
-              "_No EPSS scores returned by the FIRST.org API for any CVE in this scan._"
+              "_No EPSS scores found for CVEs in this scan._"
             else
               "CVEs with EPSS data: **\($n_epss)**. Sorted by exploitation probability (highest first, top 20 shown).",
               "",
