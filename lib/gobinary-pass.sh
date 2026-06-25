@@ -4,13 +4,13 @@
 # Scans <pass2_image> with Trivy (gobinary, ignore-unfixed) to find pre-compiled
 # Go binaries that still carry fixable CVEs after the OS patching passes.
 # For each such binary: extracts the main module path via `go version -m`,
-# installs the Go toolchain if absent from the image, then runs
-# `go install <module>@latest` and replaces the binary in-place.
+# then runs `go install <module>@latest` and replaces the binary in-place.
 #
-# Falls back to tagging pass2 as output when:
-#   - no fixable gobinary CVEs remain
-#   - the host architecture is unsupported for Go installation
-#   - `go install` fails (no upstream fix yet or build error)
+# Go is injected via a multi-stage build (golang:latest) — no curl/wget/network
+# access is required inside the target container.
+#
+# Falls back to tagging pass2 as output when no fixable gobinary CVEs remain
+# or when `go install` fails (no upstream fix yet or build error).
 
 run_gobinary_pass() {
     local pass2_image="$1"
@@ -54,41 +54,14 @@ run_gobinary_pass() {
     sed 's/^/    /' "$build_dir/vuln-bins.txt"
     echo "==> Running gobinary upgrade pass ..."
 
-    # ── Script that runs inside the container during podman build ────────────
+    # Go is copied from golang:latest via multi-stage build and removed at the
+    # end of the RUN command. --squash-all ensures it does not appear in the
+    # final image regardless of intermediate layers.
     cat > "$build_dir/run-gobinary.sh" <<'SCRIPT'
 #!/bin/sh
 set -e
 
-_fetch() {
-    if command -v curl >/dev/null 2>&1; then
-        curl -sfL "$1"
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO- "$1"
-    else
-        echo "==> No curl or wget available — cannot install Go." && exit 0
-    fi
-}
-
-GO_INSTALLED_HERE=0
-
-if ! command -v go >/dev/null 2>&1; then
-    GO_INSTALLED_HERE=1
-    case "$(uname -m)" in
-        x86_64)  GOARCH=amd64  ;;
-        aarch64) GOARCH=arm64  ;;
-        armv7l)  GOARCH=armv6l ;;
-        *)
-            echo "==> Unsupported arch for Go install: $(uname -m) — skipping gobinary pass."
-            exit 0
-            ;;
-    esac
-    GOVER=$(_fetch "https://go.dev/VERSION?m=text" | head -1)
-    echo "==> Installing ${GOVER} (${GOARCH}) ..."
-    _fetch "https://dl.google.com/go/${GOVER}.linux-${GOARCH}.tar.gz" \
-        | tar -C /usr/local -xz
-    export PATH="/usr/local/go/bin:${PATH}"
-fi
-
+export PATH="/usr/local/go/bin:${PATH}"
 export GOPATH=/tmp/_gopath
 export GOBIN=/tmp/_gopath/bin
 mkdir -p "${GOBIN}"
@@ -120,17 +93,17 @@ while IFS= read -r rel_path; do
     fi
 done < /tmp/vuln-bins.txt
 
-rm -rf "${GOPATH}"
-if [ "${GO_INSTALLED_HERE}" -eq 1 ]; then
-    rm -rf /usr/local/go
-fi
+rm -rf "${GOPATH}" /usr/local/go
 SCRIPT
 
     chmod +x "$build_dir/run-gobinary.sh"
 
     cat > "$build_dir/Dockerfile.gobinary" <<EOF
+FROM golang:latest AS _gobuilder
+
 FROM ${pass2_image}
 USER root
+COPY --from=_gobuilder /usr/local/go /usr/local/go
 COPY run-gobinary.sh /tmp/run-gobinary.sh
 COPY vuln-bins.txt   /tmp/vuln-bins.txt
 RUN sh /tmp/run-gobinary.sh && rm -f /tmp/run-gobinary.sh /tmp/vuln-bins.txt
