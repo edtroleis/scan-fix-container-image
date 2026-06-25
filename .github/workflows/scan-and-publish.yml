@@ -10,8 +10,9 @@ on:
         options:
           - docker.io
           - quay.io
+          - dhi.io
       image_name:
-        description: "Image name (e.g. library/ubuntu or username/myapp)"
+        description: "Image name (e.g. library/ubuntu or hardened-images/catalog/dhi/mongodb)"
         required: true
         type: string
       tag:
@@ -28,6 +29,16 @@ on:
           - CRITICAL
           - HIGH,CRITICAL
           - MEDIUM,HIGH,CRITICAL
+      registry_username:
+        description: "Registry username (required for dhi.io)"
+        required: false
+        type: string
+        default: ""
+      registry_password:
+        description: "Registry password (required for dhi.io) — use a GitHub Secret reference"
+        required: false
+        type: string
+        default: ""
 
 jobs:
 
@@ -50,6 +61,22 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Validate credentials (dhi.io)
+        if: inputs.registry == 'dhi.io'
+        run: |
+          if [[ -z "${{ inputs.registry_username }}" || -z "${{ inputs.registry_password }}" ]]; then
+            echo "::error::dhi.io requires registry_username and registry_password inputs."
+            exit 1
+          fi
+
+      - name: Login to registry
+        if: inputs.registry == 'dhi.io'
+        run: |
+          echo "${{ inputs.registry_password }}" | \
+            podman login dhi.io \
+              --username "${{ inputs.registry_username }}" \
+              --password-stdin
 
       - name: Pull image
         id: pull
@@ -183,6 +210,14 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Login to registry
+        if: inputs.registry == 'dhi.io'
+        run: |
+          echo "${{ inputs.registry_password }}" | \
+            podman login dhi.io \
+              --username "${{ inputs.registry_username }}" \
+              --password-stdin
 
       - name: Pull image
         run: podman pull "$SOURCE_IMAGE"
