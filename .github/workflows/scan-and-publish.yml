@@ -76,7 +76,13 @@ jobs:
 
       - name: Pull image
         id: pull
-        run: podman pull "$SOURCE_IMAGE"
+        run: |
+          if [[ "${{ inputs.registry }}" == "dhi.io" ]]; then
+            docker pull "$SOURCE_IMAGE"
+            docker save "$SOURCE_IMAGE" | podman load
+          else
+            podman pull "$SOURCE_IMAGE"
+          fi
 
       - name: Scan
         id: scan
@@ -220,7 +226,13 @@ jobs:
               --password-stdin
 
       - name: Pull image
-        run: podman pull "$SOURCE_IMAGE"
+        run: |
+          if [[ "${{ inputs.registry }}" == "dhi.io" ]]; then
+            docker pull "$SOURCE_IMAGE"
+            docker save "$SOURCE_IMAGE" | podman load
+          else
+            podman pull "$SOURCE_IMAGE"
+          fi
 
       - name: Build patched image
         run: bash patch-image.sh "$SOURCE_IMAGE" "$PATCHED_IMAGE"
