@@ -91,13 +91,20 @@ jobs:
         run: |
           pull="${{ steps.pull.outcome }}"
           scan="${{ steps.scan.outcome }}"
-          # Pull or setup failure (non-CVE error) — fail fast, skip all downstream
           if [[ "$pull" != "success" ]]; then
+            # Pull failed — infrastructure error, not a CVE result
             echo "scan_error=true"  >> "$GITHUB_OUTPUT"
             echo "has_cves=false"   >> "$GITHUB_OUTPUT"
           elif [[ "$scan" == "failure" ]]; then
-            echo "scan_error=false" >> "$GITHUB_OUTPUT"
-            echo "has_cves=true"    >> "$GITHUB_OUTPUT"
+            if [[ -f "/tmp/source-image.tar" ]]; then
+              # Tar exists → podman save succeeded → trivy ran and found CVEs
+              echo "scan_error=false" >> "$GITHUB_OUTPUT"
+              echo "has_cves=true"    >> "$GITHUB_OUTPUT"
+            else
+              # Tar missing → podman save or setup failed before trivy ran
+              echo "scan_error=true"  >> "$GITHUB_OUTPUT"
+              echo "has_cves=false"   >> "$GITHUB_OUTPUT"
+            fi
           else
             echo "scan_error=false" >> "$GITHUB_OUTPUT"
             echo "has_cves=false"   >> "$GITHUB_OUTPUT"
