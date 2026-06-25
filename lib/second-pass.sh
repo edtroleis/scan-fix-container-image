@@ -78,7 +78,7 @@ run_second_pass() {
     # FROM uses the local pass1 image by name
     cat > "$build_dir/Dockerfile.pass2" <<EOF
 FROM ${pass1_image}
-USER root
+USER 0
 COPY run-targeted.sh /tmp/run-targeted.sh
 RUN sh /tmp/run-targeted.sh && rm -f /tmp/run-targeted.sh
 ${restore_user}

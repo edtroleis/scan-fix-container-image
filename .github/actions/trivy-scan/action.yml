@@ -41,7 +41,7 @@ runs:
       shell: bash
       run: |
         rm -f "${{ inputs.tar_path }}"
-        podman save "${{ inputs.image }}" -o "${{ inputs.tar_path }}"
+        podman save --format oci-archive "${{ inputs.image }}" -o "${{ inputs.tar_path }}"
 
     - name: Scan for CVEs
       shell: bash

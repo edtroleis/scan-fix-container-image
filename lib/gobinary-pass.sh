@@ -105,7 +105,7 @@ SCRIPT
 FROM golang:latest AS _gobuilder
 
 FROM ${pass2_image}
-USER root
+USER 0
 COPY --from=_gobuilder /usr/local/go /usr/local/go
 COPY run-gobinary.sh /tmp/run-gobinary.sh
 COPY vuln-bins.txt   /tmp/vuln-bins.txt

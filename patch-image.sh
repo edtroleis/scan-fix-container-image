@@ -55,7 +55,7 @@ fi
 
 cat > "$BUILD_DIR/Dockerfile" <<EOF
 FROM ${SOURCE_IMAGE}
-USER root
+USER 0
 COPY run-update.sh /tmp/run-update.sh
 RUN sh /tmp/run-update.sh && rm -f /tmp/run-update.sh
 ${RESTORE_USER}
