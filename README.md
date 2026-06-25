@@ -1,6 +1,8 @@
 # Scan, patch, and publish container images
 
-Scan public container images for CVEs using Trivy and automatically patch them by upgrading OS and language-runtime packages from public repositories. Rescans the patched image and only publishes if it passes.
+Scan container images for CVEs using Trivy and automatically patch them by upgrading OS and language-runtime packages. Rescans the patched image and only publishes if it passes.
+
+Supports public registries (`docker.io`, `quay.io`) and authenticated registries (`dhi.io` — Docker Hardened Images).
 
 > **Simulated registry:** `podman login` and `podman push` are commented out in the publish job. The pipeline runs end-to-end (pull → scan → patch → rescan → tag) but the final push to `localhost:8083` is a no-op so the workflow can be tested without a real registry.
 
@@ -25,7 +27,7 @@ Scan public container images for CVEs using Trivy and automatically patch them b
 ## How it works
 
 ```
-Docker Hub / Quay.io
+Docker Hub / Quay.io / dhi.io (Docker Hardened Images)
         │
         ▼
 ┌─────────────────────────────────┐
@@ -145,14 +147,23 @@ No repository variables are required.
 
 ### Secrets
 
-Secrets are only needed when you uncomment the real `podman login` / `podman push` in the publish job. Go to **Settings → Secrets and variables → Actions** and add:
+Go to **Settings → Secrets and variables → Actions** and add the secrets relevant to your use case:
 
-| Secret | Value | Used by |
+| Secret | Value | Required when |
 |---|---|---|
-| `NEXUS_USER` | Registry username | Job 4 — `podman login localhost:8083` |
-| `NEXUS_PASSWORD` | Registry password | Job 4 — `podman login localhost:8083` |
+| `DHI_USERNAME` | Docker Hub username | Pulling from `dhi.io` |
+| `DHI_PASSWORD` | Docker Hub access token | Pulling from `dhi.io` |
+| `NEXUS_USER` | Registry username | Publishing to `localhost:8083` (currently simulated) |
+| `NEXUS_PASSWORD` | Registry password | Publishing to `localhost:8083` (currently simulated) |
 
-> While login and push are simulated, these secrets are not used and do not need to be set.
+**dhi.io credentials:**
+- `dhi.io` requires a free Docker Hub account — no paid plan needed
+- Use a **Docker Hub access token** (not your account password): hub.docker.com → Account Settings → Personal access tokens → Generate new token with `Public Repo Read-only` scope
+- Both `DHI_USERNAME` and `DHI_PASSWORD` must be set; the pipeline validates them before pulling and fails immediately if either is missing
+
+**Nexus credentials:**
+- Only needed when you uncomment the real `podman login` / `podman push` in the publish job
+- While push is simulated, these secrets are not used and do not need to be set
 
 ---
 
@@ -162,10 +173,18 @@ Go to **Actions → Scan and Publish Container Image → Run workflow** and fill
 
 | Input | Description | Example |
 |---|---|---|
-| `registry` | Source registry | `docker.io` or `quay.io` |
-| `image_name` | Image name including namespace | `library/ubuntu` or `redhat/granite-3-2b-instruct` |
-| `tag` | Image tag | `latest` or `24.04` |
+| `registry` | Source registry | `docker.io`, `quay.io`, or `dhi.io` |
+| `image_name` | Image name including namespace | `library/ubuntu`, `redhat/granite-3-2b-instruct`, or `hardened-images/catalog/dhi/mongodb` |
+| `tag` | Image tag | `latest`, `24.04`, or `8-debian-dev` |
 | `severity` | Minimum CVE severity that breaks the pipeline | `HIGH,CRITICAL` (default) |
+
+### Registry examples
+
+| Registry | image_name | tag | Auth |
+|---|---|---|---|
+| `docker.io` | `library/ubuntu` | `24.04` | None |
+| `quay.io` | `redhat/ubi9` | `latest` | None |
+| `dhi.io` | `hardened-images/catalog/dhi/mongodb` | `8-debian-dev` | `DHI_USERNAME` + `DHI_PASSWORD` secrets |
 
 ### Severity options
 

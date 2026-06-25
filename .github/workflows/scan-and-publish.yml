@@ -29,16 +29,8 @@ on:
           - CRITICAL
           - HIGH,CRITICAL
           - MEDIUM,HIGH,CRITICAL
-      registry_username:
-        description: "Registry username (required for dhi.io)"
-        required: false
-        type: string
-        default: ""
-      registry_password:
-        description: "Registry password (required for dhi.io) — use a GitHub Secret reference"
-        required: false
-        type: string
-        default: ""
+      # dhi.io credentials are stored as GitHub Secrets (DHI_USERNAME / DHI_PASSWORD).
+      # workflow_dispatch has no password input type — never pass credentials as plain inputs.
 
 jobs:
 
@@ -65,17 +57,17 @@ jobs:
       - name: Validate credentials (dhi.io)
         if: inputs.registry == 'dhi.io'
         run: |
-          if [[ -z "${{ inputs.registry_username }}" || -z "${{ inputs.registry_password }}" ]]; then
-            echo "::error::dhi.io requires registry_username and registry_password inputs."
+          if [[ -z "${{ secrets.DHI_USERNAME }}" || -z "${{ secrets.DHI_PASSWORD }}" ]]; then
+            echo "::error::dhi.io requires DHI_USERNAME and DHI_PASSWORD repository secrets."
             exit 1
           fi
 
       - name: Login to registry
         if: inputs.registry == 'dhi.io'
         run: |
-          echo "${{ inputs.registry_password }}" | \
+          echo "${{ secrets.DHI_PASSWORD }}" | \
             podman login dhi.io \
-              --username "${{ inputs.registry_username }}" \
+              --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
 
       - name: Pull image
@@ -214,9 +206,9 @@ jobs:
       - name: Login to registry
         if: inputs.registry == 'dhi.io'
         run: |
-          echo "${{ inputs.registry_password }}" | \
+          echo "${{ secrets.DHI_PASSWORD }}" | \
             podman login dhi.io \
-              --username "${{ inputs.registry_username }}" \
+              --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
 
       - name: Pull image
