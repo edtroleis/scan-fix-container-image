@@ -66,9 +66,10 @@ jobs:
         if: inputs.registry == 'dhi.io'
         run: |
           echo "${{ secrets.DHI_PASSWORD }}" | \
-            podman login dhi.io \
+            docker login dhi.io \
               --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
+          # podman falls back to ~/.docker/config.json, so subsequent podman pull works
 
       - name: Pull image
         id: pull
@@ -207,9 +208,10 @@ jobs:
         if: inputs.registry == 'dhi.io'
         run: |
           echo "${{ secrets.DHI_PASSWORD }}" | \
-            podman login dhi.io \
+            docker login dhi.io \
               --username "${{ secrets.DHI_USERNAME }}" \
               --password-stdin
+          # podman falls back to ~/.docker/config.json, so subsequent podman pull works
 
       - name: Pull image
         run: podman pull "$SOURCE_IMAGE"
